@@ -1,1 +1,3 @@
-# attention_guided_cropping
+This repository contains code used in the 2020 SIIM-ISIC Melanoma Detection Competition on Kaggle. The code implements an idea of mine that could expanded upon to yield good results on other vision tasks, therefore I decided I should document my findings. Although I did not create a model that is highly competitive in terms of the competition, I did manage to come up with a method that can acheive promising performance while using small image sizes, and small image models. This allowed me to run experiments on my personal hardware without requiring a prohibitive training time. 
+
+The code in this repositiry is in a working state and was only used for this specific experiments I ran for the competition. Therefore, it may not be easy to reproduce my results directly, but the repo should still serve to disseminate the general idea. 
