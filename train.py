@@ -32,10 +32,6 @@ from util import FocalLoss, DrawHair, gen_train_test_feat
 import warnings
 warnings.filterwarnings('ignore')
 
-# ResNet50, center crop 224x224, 256d meta layers, embedding dropout 0.8:
-# CV: 0.9039
-# LB: 0.9203
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--folds', type=int, default=3,
                     help='number of folds used for cross-validation')
@@ -216,11 +212,13 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
     else:
         group1 = model.resnet.parameters()
         group2 = model.feat_encoder.parameters()
+        group3 = model.classifier.parameters()
 
         optim = torch.optim.Adam(
             [
                 {"params": group1, "lr": 1e-5},
                 {"params": group2, "lr": 5e-5},
+                {"params": group3, "lr": 5e-5},
             ],
         lr=0.00001)
     
