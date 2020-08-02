@@ -65,13 +65,13 @@ These are some selected samples of the attention maps and their corresponding in
 I was not able to track down why these images generate poor attention maps, but I did observe that larger models greatly improved the consistency of the attention maps. The examples shown above were generated using a ResNet-50 backbone and the chipping model discussed earlier. Once I was able to generate satisfactory attention maps, I developed a process to convert these attention maps into square regions for cropping:
 ![converting attention map to bounding box for cropping](https://github.com/CCareaga/attention_guided_cropping/blob/master/figures/attn_to_crop.png?raw=true)
 
-When the attention fails the model generally generates a pretty unifrom attention map. This means that the bounding box creted encapsulates a very large portion of the image and therefore the cropping process defaults to maintaining the original image. With cropped versions of both the training set and the test set, a new model can be trained. By ensembling the predictions of the a ResNet trained on the original images, and a ResNet trained on the cropped images, we can get a decent boost in performance without having to increase the image size!
+When the attention fails the model generally generates a pretty unifrom attention map. This means that the bounding box created encapsulates a very large portion of the image and therefore the cropping process defaults to maintaining the original image. With cropped versions of both the training set and the test set, a new model can be trained. By ensembling the predictions of the a ResNet trained on the original images, and a ResNet trained on the cropped images, we can get a decent boost in performance without having to increase the image size!
 
 ### Implementation
 
 #### Preprocessing
 
-To start I center-cropped all images into a square using the size of their shortest side.  Next I resized each image to be 224 x 224 and store the training set and test set as .npy files (for easy loading into RAM). Before going into any of the models the images go through a series of augmentations:
+To start I center-cropped all images into a square using the size of their shortest side. Next, I resized each image to be 224 x 224 and store the training set and test set as .npy files (for easy loading into RAM). Before begin fed into any of the models, the images go through a series of augmentations:
 ```
 train_transform = transforms.Compose([
     DrawHair(),
@@ -87,7 +87,7 @@ train_transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
 ])
 ```
-All of these are built into PyTorch except the `DrawHair` transform, which is a simple class I wrote which draws random curved lines over the image simulating hair. 
+All of these are built into PyTorch except the `DrawHair` transform, which is a simple class I wrote to draw random curved lines over the image simulating hair. 
 
 The meta-data fields are converted to one-hot encodings. The one-hot encodings include an encoding for unknown/null. This process results in a 29-dimensional vector.
 
@@ -103,10 +103,10 @@ Each of these models has a very similar training process. The training data cons
 This model consists of a ResNet50 to process the image input, along with a two linear layers to process the meta-data features. The embeddings from these two branches are concatenated and sent through a final linear layer to produce a single score. This model is implemented in `resnet.py` by the class `MetaResNet`. The only variation between this model and cropnet model is the images used to train. The model is trained using the Adam optimizer, and a balanced class sampler (oversampling), meaning each batch contains an even number of each class. The ResNet portion of the model is trained with a learning rate of 1x10 <sup>-5</sup> and the rest of the parameters have a learning rate of 5x10<sup>-5</sup>. Training proceeds until the validation AUC does not improve for 3 epochs. 
 
 ##### Chipping model (chipnet)
-This model also consists of a ResNet50 backbone, but has no additional meta-data branch as it's goal is simply to produce attention maps. As explained before, each 224 x 224 image is split into 32 x 32 non-overlapping chips. Each chip is sent through the ResNet50 and the resulting embeddings are re-stacked to create 7 x 7 feature maps with some number of channels depending on the backbone. To compute attention maps, two 3 x 3 same convolutions are applied (with ReLU and batch norm in between). The result of this is a 7 x 7 map of scores. These scores are softmaxed to sum to one and used to take a weighted average of the original feature maps. This process results in a single embedding that can then be used for classification after the application of a final linear layer. This model is implemented in `resnet.py` by the class `ChipNet`. The model is trained the same way as the resnet model except  the ResNet backbone is trained with a learning rate of 5x10<sup>-5</sup> while the attention sub-net and final classifier are trained with a learning rate of 1x10<sup>-4</sup>.
+This model also consists of a ResNet50 backbone, but has no additional meta-data branch as it's goal is simply to produce attention maps. As explained before, each 224 x 224 image is split into 32 x 32 non-overlapping chips. Each chip is sent through the ResNet50 backbone and the resulting embeddings are re-stacked to create 7 x 7 feature maps with some number of channels depending on the backbone architecture. To compute attention maps, two 3 x 3 same convolutions are applied (with ReLU and batch norm in between). The result of this is a 7 x 7 map of scores. These scores are softmaxed to sum to one and used to take a weighted average of the original feature maps. This process results in a single embedding that can then be used for classification after the application of a final linear layer. This model is implemented in `resnet.py` by the class `ChipNet`. The model is trained in the same way as the resnet model except the ResNet backbone is trained with a learning rate of 5x10<sup>-5</sup> while the attention sub-net and final classifier are trained with a learning rate of 1x10<sup>-4</sup>.
 
 ##### Cropped image model (cropnet)
-As previously stated this model is trained identically to the resnet model except it uses the image cropped by the attention maps generated from the chipnet model.
+As previously stated, this model is trained identically to the resnet model except it uses the images cropped by the attention maps generated from the chipnet model.
 
 ### Results
 
@@ -128,4 +128,4 @@ The resnet model achieved the highest performance on the public leaderboard, whi
 Turns out using the predictions of the chipnet does not improve results and the best ensemble is a straight average of the resnet model and the cropnet model. Although public LB may not be the best performance indicator, I argue that it at least shows that this method is viable and extra information can be gleaned from the cropped images. 
 
 ### Conclusion
-Although the approach to medical image classification isn't necessarily novel, I believe there is still a lot of exploration to be done in this area. I could see these methods being applied to other vision tasks (for example landmark recognition). Additionally I hope this repository is at least slightly informational and encourages others to experiment beyond the typical image classification approaches.
+Although the approach to medical image classification isn't necessarily novel, I believe there is still a lot of exploration to be done in this area. I could see these methods being applied to other vision tasks (for example landmark recognition). Additionally, I hope this repository is at least slightly informational and encourages others to experiment beyond the typical image classification approaches.
