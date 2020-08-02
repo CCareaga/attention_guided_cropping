@@ -301,12 +301,16 @@ class MetaResNet(nn.Module):
         self.drop = nn.Dropout(dropout)
 
     def forward(self, imgs, feat):
+        # run images through the resnet provided and run the metadata
+        # features through the 2 layer nn
         img_emb = self.resnet(imgs)
         feat_emb = self.feat_encoder(feat)
 
+        # concatenate the each set of features, and apply dropout
         cat_feat = torch.cat((img_emb, feat_emb), 1)
         cat_feat = self.drop(cat_feat)
 
+        # run through the final layer to generate a single score
         return self.classifier(cat_feat)
 
 class ChipNet(nn.Module):
@@ -331,34 +335,48 @@ class ChipNet(nn.Module):
         self.attn_drop = nn.Dropout2d(attn_dropout)
 
     def compute_scores(self, feat_maps):
-        # input: N x C x 14 x 14
+        # the feature maps should come in as N x C X 7 x 7
+        # where C varies depending on the resnet architecture used
         N, C, H, W = feat_maps.shape
 
+        # apply dropout to feature maps before the attention subnet
         feat_maps = self.attn_drop(feat_maps)
+
+        # run feat maps through the attention subnet
         scores = self.attn_bn1(self.relu(self.attn_fc1(feat_maps)))
         scores = self.attn_fc2(scores)
 
-        pos_weights = torch.nn.functional.softmax(scores.reshape(N, 1, -1), 2).view_as(scores)
+        # softmax the scores across the spatial dimensions
+        weights = torch.nn.functional.softmax(scores.reshape(N, 1, -1), 2).view_as(scores)
 
-        self.attn_map = pos_weights.view(N, -1)
-        self.feat_map = feat_maps
+        # save both the attention maps incase we are cropping later
+        self.attn_map = weights.view(N, -1)
 
-        pos_maps = feat_maps * pos_weights
-        pos_maps = self.resnet.avgpool(pos_maps).view(N, C)
+        # multiply the attention weights and original feature maps
+        # then perform normal global average pooling
+        maps = feat_maps * weights
+        maps = self.resnet.avgpool(maps).view(N, C)
 
-        return pos_maps
+        return maps
 
     def forward(self, chips, feat):
+        # put the chips into a flat batch to send through the resnet
         chips = [c.squeeze(0) for c in torch.split(chips, 1, 0)]
         chip_batch = torch.cat(chips, 0)
 
+        # send the chips through the resnet to get a huge batch of embeddings
         chip_embs = self.resnet(chip_batch)
+        # split the embeddings up into groups of 49 (each iamge has 7 x 7 chips)
         chip_embs = torch.split(chip_embs, 49, 0)
+        # stack them up to be N x 49 x C
         chip_embs = torch.stack(chip_embs, 0)
+        # transpose to make them N x C x 49, then reshape to N x C x 7 x 7
         chip_embs = chip_embs.transpose(1, 2).view(-1, self.emb_sz, 7, 7)
         
+        # compute the attention pooled features
         x = self.compute_scores(chip_embs)
 
+        # apply dropout to the final embeddings and apply the final layer
         x = self.drop1(x)
         x = self.fc4(self.bn4(self.relu(x)))
 
