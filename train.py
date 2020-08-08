@@ -89,6 +89,9 @@ parser.add_argument('--attn_hidden_size', type=int, default=512,
 
 parser.add_argument('--num_workers', type=int, default=24,
                     help="Number of processes for dataloading")
+
+parser.add_argument('--sz', type=int, default=224,
+                    help='Size of images')
 args = parser.parse_args()
 
 # we shouldn't be running an experiment with both chipping and cropping
@@ -122,7 +125,7 @@ else:
 # try and keep it consistent and accurate, while the test set does get augmentations
 # because we run multiple round of test time augmentation
 train_transform = transforms.Compose([
-    DrawHair(size=512),
+    DrawHair(size=args.sz),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomRotation(360),
