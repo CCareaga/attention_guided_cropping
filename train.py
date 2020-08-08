@@ -44,6 +44,9 @@ parser.add_argument('--train_data', type=str, default='data/train_224.npy',
 parser.add_argument('--test_data', type=str, default='data/test_224.npy',
                     help='path to test data numpy array')
 
+parser.add_argument('--sample_submission', type=str, default='data/sample_submission.csv',
+                    help='path to sample_submission.csv file')
+
 parser.add_argument('--folds', type=int, default=3,
                     help='number of folds used for cross-validation')
 parser.add_argument('--patience', type=int, default=3,
@@ -84,6 +87,11 @@ parser.add_argument('--meta_hidden_size', type=int, default=256,
 parser.add_argument('--attn_hidden_size', type=int, default=512,
                     help='hidden size of the attention branch in chipnet')
 
+parser.add_argument('--num_workers', type=int, default=24,
+                    help="Number of processes for dataloading")
+
+parser.add_argument('--sz', type=int, default=224,
+                    help='Size of images')
 args = parser.parse_args()
 
 # we shouldn't be running an experiment with both chipping and cropping
@@ -117,7 +125,7 @@ else:
 # try and keep it consistent and accurate, while the test set does get augmentations
 # because we run multiple round of test time augmentation
 train_transform = transforms.Compose([
-    DrawHair(),
+    DrawHair(size=args.sz),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomRotation(360),
@@ -160,7 +168,7 @@ if not args.cropped:
 train_feat, test_feat = gen_train_test_feat(train_csv, test_csv)
 
 # generate stratified splits using fixed random seed
-skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=408)
+skf = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=408)
 
 dummy_X = np.zeros(len(train_csv))
 train_y = train_csv['target']
@@ -177,7 +185,7 @@ if not args.cropped:
         transform=test_transform,
         chip=args.chipped
     )
-    test_loader = DataLoader(dataset=test_dset, batch_size=args.test_batch_size, shuffle=False)
+    test_loader = DataLoader(dataset=test_dset, batch_size=args.test_batch_size, shuffle=False, num_workers=args.num_workers)
 
 # create arrays for final test set predictions and best fold performances
 final_preds = torch.zeros(len(test_csv))
@@ -220,14 +228,15 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
     resnet = resnet_dict[args.resnet](pretrained=True)
     model = model_class(resnet, **model_kwargs)
     model = model.cuda()
+    model = nn.DataParallel(model)
     
     # create optimizer depending on the experiment running
     if args.chipped:
-        group1 = model.resnet.parameters()
-        group2 = list(model.attn_fc1.parameters()) + \
-                 list(model.attn_fc2.parameters()) + \
-                 list(model.attn_bn1.parameters())
-        group3 = list(model.fc4.parameters()) + list(model.bn4.parameters())
+        group1 = model.module.resnet.parameters()
+        group2 = list(model.module.attn_fc1.parameters()) + \
+                 list(model.module.attn_fc2.parameters()) + \
+                 list(model.module.attn_bn1.parameters())
+        group3 = list(model.module.fc4.parameters()) + list(model.module.bn4.parameters())
             
         optim = torch.optim.Adam(
             [
@@ -238,9 +247,9 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
         lr=0.00001)
 
     else:
-        group1 = model.resnet.parameters()
-        group2 = model.feat_encoder.parameters()
-        group3 = model.classifier.parameters()
+        group1 = model.module.resnet.parameters()
+        group2 = model.module.feat_encoder.parameters()
+        group3 = model.module.classifier.parameters()
 
         optim = torch.optim.Adam(
             [
@@ -331,10 +340,10 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
 
                 output = model(imgs, feat)            
 
-                preds = torch.sigmoid(output)
-                rounded = torch.round(preds)
+                preds = torch.sigmoid(output).cpu()
+                rounded = torch.round(preds).cpu()
 
-                correct += (rounded.cpu().long() == labels.cpu()).sum().item()
+                correct += (rounded.long() == labels).sum().item()
 
                 val_preds.extend(list(preds))
                 val_labels.extend(list(labels))
@@ -373,7 +382,8 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
         # check the early stopping criteria, updated save model if need be
         if auc >= best_auc:
             print("saving best weights")
-            torch.save(model, best_model_path)
+            #torch.save(model, best_model_path)
+            torch.save(model.module.state_dict(), best_model_path)
 
             patience = args.patience
             best_auc = auc
@@ -399,21 +409,17 @@ for fold, (train_idx, valid_idx) in enumerate(skf.split(X=dummy_X, y=train_y), 1
 
     # save the final model I really just do this because the chipnet model seemed to continue to 
     # generate good attention maps even after "overfitting" in terms of AUC
-    torch.save(model, final_model_path)
+    #torch.save(model, final_model_path)
+    torch.save(model.module.state_dict(), final_model_path)
 
 
 # write out the final ensemble of predicitons and print model performance
 final_preds /= args.folds
-sub = pd.read_csv('data/sample_submission.csv')
+sub = pd.read_csv(args.sample_submission)
 sub['target'] = final_preds.cpu().numpy().reshape(-1,)
 sub.to_csv(f'output/{args.name}_submission.csv', index=False)
 
 print(f"fold best aucs: {fold_aucs}")
 oof = sum(fold_aucs) / float(len(fold_aucs))
 print(f"avg oof auc: {oof}")
-
-
-
-
-
 
