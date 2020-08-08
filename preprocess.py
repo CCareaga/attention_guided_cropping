@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
+import torchvision.transforms as transforms
+import argparse
 
 def center_crop_resize(csv_path, data_path, output_path, sz=224):
 
@@ -43,3 +45,4 @@ parser.add_argument('--output_path', type=str,
 args = parser.parse_args()
 
 center_crop_resize(args.csv_path, args.data_path, args.output_path)
+
